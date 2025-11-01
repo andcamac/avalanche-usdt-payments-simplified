@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pagos USDT en Avalanche - Simplificado</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        input, button { padding: 10px; margin: 5px; width: 100%; box-sizing: border-box; }
+        #status { margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 5px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <h1>Pagos Rápidos con USDT en Avalanche</h1>
+    <p>Conecta tu MetaMask y envía USDT en transacciones sub-segundo. Sin generación de billeteras nuevas.</p>
+
+    <button onclick="connectWallet()" id="connectBtn">Conectar MetaMask</button>
+
+    <div id="walletInfo" class="hidden">
+        <p><strong>Dirección:</strong> <span id="address"></span></p>
+        <p><strong>Balance USDT:</strong> <span id="usdtBalance">0</span> USDT</p>
+        <button onclick="checkBalance()">Actualizar Balance</button>
+    </div>
+
+    <div id="sendForm" class="hidden">
+        <label>Dirección Receptora:</label>
+        <input type="text" id="recipient" placeholder="0x...">
+        <label>Cantidad USDT:</label>
+        <input type="number" id="amount" placeholder="1.0" step="0.01">
+        <button onclick="sendUSDT()">Enviar USDT</button>
+    </div>
+
+    <div id="status"></div>
+
+    <!-- CDN para ethers.js -->
+    <script src="https://unpkg.com/ethers@6.13.2/lib/index.js"></script>
+
+    <script>
+        // Configuración Avalanche Mainnet
+        const AVALANCHE_RPC = 'https://api.avax.network/ext/bc/C/rpc';
+        const CHAIN_ID = 43114; // Cambia a 43113 para testnet
+        const USDT_ADDRESS = '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7'; // USDT en Avalanche
+
+        // ABI mínima para USDT (ERC-20 transfer y balanceOf)
+        const USDT_ABI = [
+            'function balanceOf(address) view returns (uint256)',
+            'function transfer(address to, uint256 amount) returns (bool)'
+        ];
+
+        let provider = null;
+        let signer = null;
+        let usdtContract = null;
+
+        // Conectar MetaMask y switch a Avalanche
+        async function connectWallet() {
+            if (typeof window.ethereum === 'undefined') {
+                setStatus('Error: Instala MetaMask.');
+                return;
+            }
+
+            try {
+                // Solicitar cuentas
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                provider = new ethers.JsonRpcProvider(AVALANCHE_RPC);
+                signer = new ethers.Wallet(accounts[0], provider); // Usa signer con private key implícita via MetaMask
+                // Para signer real con MetaMask: await provider.send('eth_requestAccounts', []);
+
+                // Switch a Avalanche
+                try {
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: '0xA86A' }], // 43114 en hex
+                    });
+                } catch (switchError) {
+                    // Si no está added, agregar chain
+                    if (switchError.code === 4902) {
+                        await window.ethereum.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [{
+                                chainId: '0xA86A',
+                                chainName: 'Avalanche C-Chain',
+                                rpcUrls: [AVALANCHE_RPC],
+                                nativeCurrency: { name: 'AVAX', symbol: 'AVAX', decimals: 18 },
+                                blockExplorerUrls: ['https://snowtrace.io/']
+                            }]
+                        });
+                    }
+                }
+
+                const address = accounts[0];
+                usdtContract = new ethers.Contract(USDT_ADDRESS, USDT_ABI, signer);
+
+                document.getElementById('address').textContent = address;
+                document.getElementById('walletInfo').classList.remove('hidden');
+                document.getElementById('sendForm').classList.remove('hidden');
+                document.getElementById('connectBtn').classList.add('hidden');
+
+                setStatus('MetaMask conectado. Switch a Avalanche completado.');
+                await checkBalance();
+            } catch (error) {
+                setStatus(`Error al conectar: ${error.message}`);
+            }
+        }
+
+        // Verificar balance USDT
+        async function checkBalance() {
+            if (!usdtContract) return;
+            try {
+                const address = await signer.getAddress();
+                const balanceWei = await usdtContract.balanceOf(address);
+                const balanceUSDT = ethers.formatUnits(balanceWei, 6); // 6 decimales
+                document.getElementById('usdtBalance').textContent = balanceUSDT;
+                setStatus('Balance actualizado.');
+            } catch (error) {
+                setStatus(`Error en balance: ${error.message}`);
+            }
+        }
+
+        // Enviar USDT
+        async function sendUSDT() {
+            const recipient = document.getElementById('recipient').value.trim();
+            const amountStr = document.getElementById('amount').value.trim();
+            if (!recipient || !amountStr) {
+                setStatus('Error: Completa todos los campos.');
+                return;
+            }
+
+            if (!ethers.isAddress(recipient)) {
+                setStatus('Error: Dirección receptora inválida.');
+                return;
+            }
+
+            try {
+                const amountWei = ethers.parseUnits(amountStr, 6);
+
+                setStatus('Enviando... (sub-segundo en Avalanche)');
+                const tx = await usdtContract.transfer(recipient, amountWei);
+                await tx.wait(); // Esperar confirmación
+
+                setStatus(`¡Enviado! Hash: ${tx.hash}. Ver en snowtrace.io/tx/${tx.hash}`);
+                await checkBalance();
+            } catch (error) {
+                setStatus(`Error al enviar: ${error.message}. Verifica fondos, gas y aprobación.`);
+            }
+        }
+
+        function setStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+    </script>
+</body>
+</html>
